@@ -13,6 +13,7 @@ import lustre/element.{type Element, element}
 import lustre/element/html
 import lustre/event
 
+import internal/color_controls
 import internal/host
 import internal/now_playing
 import internal/waveform
@@ -26,7 +27,8 @@ import internal/waveform
 pub fn register() -> Result(Nil, lustre.Error) {
   use _ <- result.try(host.register())
   use _ <- result.try(waveform.register())
-  now_playing.register()
+  use _ <- result.try(now_playing.register())
+  color_controls.register()
 }
 
 // ---------------------------------------------------------------------------
@@ -51,6 +53,14 @@ pub fn waveform(
 /// Auto-updating status line (▶ 0:42 / 3:14). Self-listens to status events.
 pub fn now_playing() -> Element(msg) {
   element(now_playing.element_name, [], [])
+}
+
+/// Five vertical sliders driving the OKLCH waveform palette:
+/// contrast, lightness, saturation, hue, hue-spread. Any `waveform(...)`
+/// without an explicit `palette(...)` opts into the live palette and
+/// re-renders as sliders move.
+pub fn color_controls() -> Element(msg) {
+  element(color_controls.element_name, [], [])
 }
 
 // ---------------------------------------------------------------------------
@@ -146,11 +156,12 @@ fn demo_view(_model: Nil) -> Element(DemoMsg) {
   html.div([class("demo"), attribute("style", "padding: 24px; font-family: sans-serif; max-width: 720px;")], [
     host(),
     html.h1([], [html.text("audio_player_with_waveform — demo")]),
-    waveform(url: demo_url, opts: [height(72), palette("vibrant")]),
+    waveform(url: demo_url, opts: [height(72)]),
     html.div([attribute("style", "display: flex; gap: 8px; align-items: center; margin-top: 12px;")], [
       html.button([event.on_click(TogglePlay(demo_url))], [html.text("⏯  Toggle")]),
       html.button([event.on_click(SeekHalf(demo_url))], [html.text("⤳ Seek 50%")]),
       now_playing(),
     ]),
+    html.div([attribute("style", "margin-top: 24px;")], [color_controls()]),
   ])
 }

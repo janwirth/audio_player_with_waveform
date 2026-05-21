@@ -11,6 +11,8 @@ import {
   renderWaveform,
   setupCanvas,
   paletteByName,
+  getLivePalette,
+  subscribeLivePalette,
 } from "./waveform_ffi.mjs";
 import { dispatchSeek } from "./audio_ffi.mjs";
 
@@ -26,7 +28,7 @@ export function mountWaveform(root, innerId) {
   if (!host) return;
 
   const url = host.getAttribute?.("url") || "";
-  const paletteName = host.getAttribute?.("palette") || "classic";
+  const paletteAttr = host.getAttribute?.("palette") || "";
   const height = parseInt(host.getAttribute?.("height") || "64", 10);
 
   if (!url) return;
@@ -42,12 +44,7 @@ export function mountWaveform(root, innerId) {
     height: `${height}px`,
     cursor: "pointer",
   });
-  // The custom-element host is inline by default; make it a block so it
-  // actually takes width.
-  Object.assign(host.style, {
-    display: "block",
-    width: "100%",
-  });
+  Object.assign(host.style, { display: "block", width: "100%" });
 
   const canvas = document.createElement("canvas");
   Object.assign(canvas.style, {
@@ -71,7 +68,10 @@ export function mountWaveform(root, innerId) {
   });
   inner.appendChild(playhead);
 
-  const palette = paletteByName(paletteName);
+  // Static named palette wins if user explicitly set one; otherwise the
+  // live (color-controls-driven) palette is used and we re-render on change.
+  const usingLive = !paletteAttr;
+  let palette = usingLive ? getLivePalette() : paletteByName(paletteAttr);
   let renderData = null;
   let drawWidth = inner.clientWidth || host.clientWidth || 600;
 
@@ -113,9 +113,18 @@ export function mountWaveform(root, innerId) {
   };
   inner.addEventListener("click", clickHandler);
 
+  let unsubPalette = () => {};
+  if (usingLive) {
+    unsubPalette = subscribeLivePalette((p) => {
+      palette = p;
+      if (renderData) draw();
+    });
+  }
+
   inner.__apww_cleanup = () => {
     ro.disconnect();
     window.removeEventListener(STATUS_EV, statusHandler);
     inner.removeEventListener("click", clickHandler);
+    unsubPalette();
   };
 }

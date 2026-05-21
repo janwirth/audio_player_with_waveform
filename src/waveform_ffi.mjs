@@ -123,6 +123,75 @@ export function paletteByName(name) {
   return PALETTES[name] || PALETTES.classic;
 }
 
+// Generate an OKLCH-based palette. Ported from
+// react-web-audio-platform/.../color-palettes.ts:generateOklchPalette.
+export function oklchPalette({
+  hue = 0,
+  saturation = 0.2,
+  hueSpread = 60,
+  contrast = 0,
+  lightness = 0.5,
+} = {}) {
+  const h = Math.max(0, Math.min(360, hue));
+  const s = Math.max(0, Math.min(0.4, saturation));
+  const sp = Math.max(0, Math.min(180, hueSpread));
+  const c = Math.max(-1, Math.min(1, contrast));
+  const l = Math.max(0.1, Math.min(0.9, lightness));
+
+  const range = Math.abs(c) * 0.4;
+  const inverted = c < 0;
+  const lowL = clamp01(l + (inverted ? range : -range));
+  const midL = l;
+  const highL = clamp01(l + (inverted ? -range : range));
+
+  const midShift = sp / 3;
+  const highShift = (sp * 2) / 3;
+  const lowH = h;
+  const midH = (h + midShift) % 360;
+  const highH = (h + highShift) % 360;
+
+  const lowS = Math.min(0.4, s * 1.2);
+  const midS = Math.min(0.4, s);
+  const highS = Math.min(0.4, s * 0.8);
+
+  return {
+    bg: "oklch(0.98 0 0)",
+    low: `oklch(${lowL} ${lowS} ${lowH})`,
+    mid: `oklch(${midL} ${midS} ${midH})`,
+    high: `oklch(${highL} ${highS} ${highH})`,
+  };
+}
+
+function clamp01(v) {
+  return Math.max(0, Math.min(1, v));
+}
+
+// ---- live palette pub/sub ------------------------------------------------
+// Color-controls element mutates this; mounted waveforms re-render on change.
+
+let livePalette = oklchPalette({ hue: 200, saturation: 0.2, hueSpread: 60 });
+const liveSubs = new Set();
+
+export function getLivePalette() {
+  return livePalette;
+}
+
+export function setLivePalette(p) {
+  livePalette = p;
+  for (const fn of liveSubs) {
+    try {
+      fn(p);
+    } catch (e) {
+      console.error(e);
+    }
+  }
+}
+
+export function subscribeLivePalette(fn) {
+  liveSubs.add(fn);
+  return () => liveSubs.delete(fn);
+}
+
 export function setupCanvas(canvas, width, height) {
   const dpr = window.devicePixelRatio || 1;
   canvas.style.width = width + "px";
