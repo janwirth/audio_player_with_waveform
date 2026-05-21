@@ -159,6 +159,7 @@ export function oklchPalette({
     low: `oklch(${lowL} ${lowS} ${lowH})`,
     mid: `oklch(${midL} ${midS} ${midH})`,
     high: `oklch(${highL} ${highS} ${highH})`,
+    midParams: { l: midL, s: midS, h: midH },
   };
 }
 
@@ -169,7 +170,13 @@ function clamp01(v) {
 // ---- live palette pub/sub ------------------------------------------------
 // Color-controls element mutates this; mounted waveforms re-render on change.
 
-let livePalette = oklchPalette({ hue: 200, saturation: 0.2, hueSpread: 60 });
+let livePalette = oklchPalette({
+  hue: 212,
+  saturation: 0.1,
+  hueSpread: 38,
+  contrast: 1,
+  lightness: 0.3,
+});
 const liveSubs = new Set();
 
 export function getLivePalette() {
@@ -190,6 +197,44 @@ export function setLivePalette(p) {
 export function subscribeLivePalette(fn) {
   liveSubs.add(fn);
   return () => liveSubs.delete(fn);
+}
+
+// ---- live playhead settings ---------------------------------------------
+// Controls the two invert strips around the play cursor: their widths in %
+// of the waveform, and the backdrop-filter invert strength.
+
+let livePlayhead = {
+  leftPct: 1,
+  centerPx: 6,
+  rightPct: 0,
+  leftMode: "saturation",
+  centerMode: "color-burn",
+  rightMode: "overlay",
+  leftColors: ["white"],
+  centerColors: ["invert", "triad1", "triad2"],
+  rightColors: ["black"],
+  leftFill: true,
+};
+const playheadSubs = new Set();
+
+export function getLivePlayhead() {
+  return livePlayhead;
+}
+
+export function setLivePlayhead(patch) {
+  livePlayhead = { ...livePlayhead, ...patch };
+  for (const fn of playheadSubs) {
+    try {
+      fn(livePlayhead);
+    } catch (e) {
+      console.error(e);
+    }
+  }
+}
+
+export function subscribeLivePlayhead(fn) {
+  playheadSubs.add(fn);
+  return () => playheadSubs.delete(fn);
 }
 
 export function setupCanvas(canvas, width, height) {
@@ -213,6 +258,8 @@ export function renderWaveform(canvas, data, palette) {
   const h = canvas.height / dpr;
   ctx2.clearRect(0, 0, w, h);
 
+  const N = waveformData.length;
+  if (N === 0) return;
   const maxW = Math.max(...waveformData);
   if (maxW <= 0) return;
 
@@ -222,10 +269,11 @@ export function renderWaveform(canvas, data, palette) {
   const effectiveMax = median > 0 ? median : maxW;
   const QL = 8;
   const FQL = 16;
+  const maxAmp = h - 1;
   const normWave = waveformData.map((v) => {
     const n = Math.min(1, v / effectiveMax);
     const q = Math.floor(n * QL) / QL;
-    return q * (h - 1);
+    return q * maxAmp;
   });
 
   let maxLow = 0, maxMid = 0, maxHigh = 0;
@@ -235,39 +283,56 @@ export function renderWaveform(canvas, data, palette) {
     if (s.highEnergy > maxHigh) maxHigh = s.highEnergy;
   }
 
-  const step = w / waveformData.length;
+  // Iterate by pixel column, sampling the waveform with linear interpolation,
+  // so every pixel is covered regardless of canvas width vs sample count.
+  const step = w / N;
   const rectW = Math.max(1, Math.floor(step));
   const bottom = Math.floor(h);
 
   ctx2.imageSmoothingEnabled = false;
 
-  for (let i = 0; i < waveformData.length; i++) {
-    const amp = normWave[i];
+  const sampleAt = (pixelX) => {
+    const idx = pixelX / step;
+    const i0 = Math.max(0, Math.min(N - 1, Math.floor(idx)));
+    const i1 = Math.max(0, Math.min(N - 1, i0 + 1));
+    const t = idx - i0;
+    const amp = normWave[i0] * (1 - t) + normWave[i1] * t;
+    const s0 = spectralData[i0];
+    const s1 = spectralData[i1];
+    const sp = {
+      low: s0.lowEnergy * (1 - t) + s1.lowEnergy * t,
+      mid: s0.midEnergy * (1 - t) + s1.midEnergy * t,
+      high: s0.highEnergy * (1 - t) + s1.highEnergy * t,
+    };
+    return { amp, sp };
+  };
+
+  const qlv = (v) =>
+    (Math.min(FQL - 1, Math.max(0, Math.floor((v / maxAmp) * FQL))) / FQL) *
+    maxAmp;
+
+  for (let pixelX = 0; pixelX < w; pixelX += rectW) {
+    const { amp, sp } = sampleAt(pixelX);
     if (amp <= 0) continue;
-    const s = spectralData[i];
-    const nl = maxLow > 0 ? Math.max(0.1, s.lowEnergy / maxLow) : 0.1;
-    const nm = maxMid > 0 ? Math.max(0.1, s.midEnergy / maxMid) : 0.1;
-    const nh = maxHigh > 0 ? Math.max(0.1, s.highEnergy / maxHigh) : 0.1;
+
+    const nl = maxLow > 0 ? Math.max(0.1, sp.low / maxLow) : 0.1;
+    const nm = maxMid > 0 ? Math.max(0.1, sp.mid / maxMid) : 0.1;
+    const nh = maxHigh > 0 ? Math.max(0.1, sp.high / maxHigh) : 0.1;
     const tot = nl + nm + nh;
-    let la = amp * (nl / tot);
-    let ma = amp * (nm / tot);
-    let ha = amp * (nh / tot);
+    const la = Math.floor(qlv(amp * (nl / tot)));
+    const ma = Math.floor(qlv(amp * (nm / tot)));
+    const ha = Math.floor(qlv(amp * (nh / tot)));
 
-    const qlv = (v) =>
-      (Math.min(FQL - 1, Math.max(0, Math.floor((v / (h - 1)) * FQL))) / FQL) *
-      (h - 1);
-    la = Math.floor(qlv(la));
-    ma = Math.floor(qlv(ma));
-    ha = Math.floor(qlv(ha));
-
-    const x = Math.floor(i * step);
+    const x = Math.floor(pixelX);
+    // Cover any remainder pixels on the last column.
+    const drawW = Math.min(rectW, Math.ceil(w) - x);
 
     ctx2.fillStyle = palette.low;
-    ctx2.fillRect(x, bottom - la, rectW, la);
+    ctx2.fillRect(x, bottom - la, drawW, la);
     ctx2.fillStyle = palette.mid;
-    ctx2.fillRect(x, bottom - la - ma, rectW, ma);
+    ctx2.fillRect(x, bottom - la - ma, drawW, ma);
     ctx2.fillStyle = palette.high;
-    ctx2.fillRect(x, bottom - la - ma - ha, rectW, ha);
+    ctx2.fillRect(x, bottom - la - ma - ha, drawW, ha);
   }
 
   // baseline

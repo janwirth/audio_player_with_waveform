@@ -16,6 +16,7 @@ import lustre/event
 import internal/color_controls
 import internal/host
 import internal/now_playing
+import internal/stereo
 import internal/waveform
 
 // ---------------------------------------------------------------------------
@@ -28,6 +29,7 @@ pub fn register() -> Result(Nil, lustre.Error) {
   use _ <- result.try(host.register())
   use _ <- result.try(waveform.register())
   use _ <- result.try(now_playing.register())
+  use _ <- result.try(stereo.register())
   color_controls.register()
 }
 
@@ -61,6 +63,17 @@ pub fn now_playing() -> Element(msg) {
 /// re-renders as sliders move.
 pub fn color_controls() -> Element(msg) {
   element(color_controls.element_name, [], [])
+}
+
+/// Live 32-band stereo spectrum (max of L/R channels). Tiny by default
+/// (32px square); pass [`size(64)`](#size) to scale up.
+pub fn stereo() -> Element(msg) {
+  element(stereo.element_name, [], [])
+}
+
+/// Square px for the stereo visualiser.
+pub fn size(px: Int) -> Attribute(msg) {
+  attribute("size", int_to_string(px))
 }
 
 // ---------------------------------------------------------------------------
@@ -102,6 +115,13 @@ pub fn seek(url: String, percent: Float) -> Effect(msg) {
   effect.from(fn(_dispatch) { ffi_dispatch_seek(url, percent) })
 }
 
+/// Toggle the global keyboard handler (Space = play/pause). Enabled by
+/// default when the host element mounts. Dispatch from `update` whenever
+/// the user toggles a "Pause with space" preference.
+pub fn enable_keyboard(enabled: Bool) -> Effect(msg) {
+  effect.from(fn(_dispatch) { ffi_set_keyboard_enabled(enabled) })
+}
+
 // ---------------------------------------------------------------------------
 // FFI
 // ---------------------------------------------------------------------------
@@ -118,6 +138,9 @@ fn ffi_dispatch_toggle(url: String) -> Nil
 @external(javascript, "./audio_ffi.mjs", "dispatchSeek")
 fn ffi_dispatch_seek(url: String, percent: Float) -> Nil
 
+@external(javascript, "./audio_ffi.mjs", "setKeyboardEnabled")
+fn ffi_set_keyboard_enabled(enabled: Bool) -> Nil
+
 @external(javascript, "./component_ffi.mjs", "intToString")
 fn int_to_string(n: Int) -> String
 
@@ -127,7 +150,8 @@ fn int_to_string(n: Int) -> String
 // importing this module never call `main` so this code is inert for them.
 // ---------------------------------------------------------------------------
 
-const demo_url: String = "https://samplelib.com/mp3/sample-40s.mp3"
+// const demo_url: String = "https://samplelib.com/mp3/sample-40s.mp3"
+const demo_url: String = "https://t4.bcbits.com/stream/0efb94413b51f1ae432714544853de07/mp3-128/446649198?p=0&ts=1779449905&t=b72a4ddf44ad5d447f4d3a6ce903fcb07a2f5a47&token=1779449905_1a98492471d533a9fc2093d447fd40afb03bbb5f"
 
 type DemoMsg {
   TogglePlay(String)
@@ -159,6 +183,7 @@ fn demo_view(_model: Nil) -> Element(DemoMsg) {
     waveform(url: demo_url, opts: [height(72)]),
     html.div([attribute("style", "display: flex; gap: 8px; align-items: center; margin-top: 12px;")], [
       html.button([event.on_click(TogglePlay(demo_url))], [html.text("⏯  Toggle")]),
+      stereo(),
       html.button([event.on_click(SeekHalf(demo_url))], [html.text("⤳ Seek 50%")]),
       now_playing(),
     ]),

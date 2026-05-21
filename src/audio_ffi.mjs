@@ -133,6 +133,7 @@ function waitReady(audio, cb) {
 export function installBus() {
   if (window[BUS]) return;
   window[BUS] = true;
+  setKeyboardEnabled(true);
   window.addEventListener(EVENTS.PLAY, (e) => play(e.detail?.url));
   window.addEventListener(EVENTS.PAUSE, () => pause());
   window.addEventListener(EVENTS.TOGGLE, (e) => toggle(e.detail?.url));
@@ -156,6 +157,31 @@ export function dispatchSeek(url, percent) {
   window.dispatchEvent(
     new CustomEvent(EVENTS.SEEK, { detail: { url, percent } }),
   );
+}
+
+// ---- global keyboard handler --------------------------------------------
+// When enabled, Space toggles play/pause anywhere on the page (except when
+// the user is typing in an input / textarea / contenteditable element).
+
+let keyboardListener = null;
+
+export function setKeyboardEnabled(enabled) {
+  if (enabled && !keyboardListener) {
+    keyboardListener = (e) => {
+      if (e.code !== "Space" && e.key !== " ") return;
+      const t = e.target;
+      const tag = t?.tagName;
+      if (tag === "INPUT" || tag === "TEXTAREA" || t?.isContentEditable) return;
+      e.preventDefault();
+      const audio = getAudio();
+      if (audio.paused) audio.play().catch((err) => console.error(err));
+      else audio.pause();
+    };
+    document.addEventListener("keydown", keyboardListener);
+  } else if (!enabled && keyboardListener) {
+    document.removeEventListener("keydown", keyboardListener);
+    keyboardListener = null;
+  }
 }
 
 // Subscribe — called from host element so it can re-render on status.
