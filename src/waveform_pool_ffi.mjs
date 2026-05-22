@@ -8,7 +8,7 @@
 
 const MAX_CONCURRENT = 3;
 const MAX_WORKERS = 3;
-const MAX_QUEUE = 100;
+const MAX_QUEUE = 50;
 
 // ---- outer pipeline scheduler ------------------------------------------
 
