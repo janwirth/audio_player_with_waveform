@@ -11,6 +11,7 @@
 
 import {
   schedule as scheduleAnalysis,
+  scheduleJob,
   cacheGet,
   cachePut,
 } from "./waveform_pool_ffi.mjs";
@@ -32,32 +33,27 @@ export async function loadRenderData(url) {
   if (inflight.has(url)) return inflight.get(url);
 
   const p = (async () => {
-    // 1. IDB cache hit?
+    // 1. IDB cache hit? — runs before queueing; cheap, no network.
     const cached = await cacheGet(url);
     if (cached && cached.waveformData && cached.spectralData) {
       renderCache.set(url, cached);
-      inflight.delete(url);
       return cached;
     }
 
-    // 2. Decode (main thread; browser uses a separate native thread anyway).
-    const buf = await fetch(url).then((r) => r.arrayBuffer());
-    const audioBuffer = await ctx().decodeAudioData(buf.slice(0));
-
-    // 3. Schedule analysis on a worker. Copy the channel data since the
-    // transfer detaches the buffer (AudioBuffer keeps its own copy).
-    const ch = audioBuffer.getChannelData(0);
-    const pcm = new Float32Array(ch);
-    const data = await scheduleAnalysis(pcm);
-
-    // 4. Persist for next session.
-    cachePut(url, data);
-    renderCache.set(url, data);
+    // Not cached: gate the heavy pipeline (fetch + decode + analyse) behind
+    // the global concurrency scheduler. Newest mounted waveforms run first.
+    return scheduleJob(async () => {
+      const buf = await fetch(url).then((r) => r.arrayBuffer());
+      const audioBuffer = await ctx().decodeAudioData(buf.slice(0));
+      const ch = audioBuffer.getChannelData(0);
+      const pcm = new Float32Array(ch);
+      const data = await scheduleAnalysis(pcm);
+      cachePut(url, data);
+      renderCache.set(url, data);
+      return data;
+    });
+  })().finally(() => {
     inflight.delete(url);
-    return data;
-  })().catch((err) => {
-    inflight.delete(url);
-    throw err;
   });
   inflight.set(url, p);
   return p;

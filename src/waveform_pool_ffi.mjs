@@ -1,25 +1,24 @@
-// Worker pool + LIFO queue + IndexedDB cache for waveform render data.
+// Concurrency gate + worker pool + IndexedDB cache for waveform render data.
 //
-// Pool size 3. Newest job in `schedule()` runs first (stack semantics).
-// Subscribers get `{queued, active}` on every state change.
+// `scheduleJob(asyncFn)` gates the full pipeline (fetch + decode + analysis)
+// at MAX_CONCURRENT in flight, newest first (LIFO stack).
+//
+// Internally, the CPU-bound analysis step uses a small pool of module
+// workers reused across jobs.
 
+const MAX_CONCURRENT = 3;
 const MAX_WORKERS = 3;
 
-const stack = []; // pending jobs, newest at the end
-const idle = []; // idle worker pool
-const inflight = new Map(); // jobId -> {resolve, reject, worker}
-let nextJobId = 1;
-let workersCreated = 0;
-let busy = 0;
-const subs = new Set();
+// ---- outer pipeline scheduler ------------------------------------------
 
-let cacheCount = 0;
-let cacheCountInitialized = false;
+const jobStack = []; // pending {fn, resolve, reject}
+let jobActive = 0;
+const subs = new Set();
 
 function emit() {
   const detail = {
-    queued: stack.length,
-    active: busy,
+    queued: jobStack.length,
+    active: jobActive,
     cacheSize: cacheCount,
   };
   for (const fn of subs) {
@@ -31,9 +30,52 @@ function emit() {
   }
 }
 
+function pumpJobs() {
+  while (jobStack.length > 0 && jobActive < MAX_CONCURRENT) {
+    const job = jobStack.pop(); // LIFO
+    jobActive++;
+    emit();
+    Promise.resolve()
+      .then(() => job.fn())
+      .then(
+        (val) => {
+          jobActive--;
+          job.resolve(val);
+          emit();
+          pumpJobs();
+        },
+        (err) => {
+          jobActive--;
+          job.reject(err);
+          emit();
+          pumpJobs();
+        },
+      );
+  }
+}
+
+export function scheduleJob(fn) {
+  return new Promise((resolve, reject) => {
+    jobStack.push({ fn, resolve, reject });
+    emit();
+    pumpJobs();
+  });
+}
+
+// ---- analysis worker pool (internal; used inside scheduleJob bodies) ----
+
+const stack = []; // pending analysis tasks, newest at the end
+const idle = []; // idle worker pool
+const inflight = new Map(); // jobId -> {resolve, reject}
+let nextJobId = 1;
+let workersCreated = 0;
+
+let cacheCount = 0;
+let cacheCountInitialized = false;
+
 export function subscribeQueueStatus(fn) {
   subs.add(fn);
-  fn({ queued: stack.length, active: busy, cacheSize: cacheCount });
+  fn({ queued: jobStack.length, active: jobActive, cacheSize: cacheCount });
   ensureCacheCount();
   return () => subs.delete(fn);
 }
@@ -65,11 +107,9 @@ function createWorker() {
     const cb = inflight.get(jobId);
     if (!cb) return;
     inflight.delete(jobId);
-    busy--;
     idle.push(w);
     if (ok) cb.resolve({ waveformData, spectralData });
     else cb.reject(new Error(error));
-    emit();
     dispatch();
   });
   w.addEventListener("error", (err) => {
@@ -84,12 +124,10 @@ function dispatch() {
     if (!haveWorker) return;
     const job = stack.pop(); // LIFO: newest first
     const w = idle.pop() || createWorker();
-    busy++;
     inflight.set(job.jobId, { resolve: job.resolve, reject: job.reject });
     w.postMessage({ jobId: job.jobId, channelData: job.channelData }, [
       job.channelData.buffer,
     ]);
-    emit();
   }
 }
 
@@ -97,7 +135,6 @@ export function schedule(channelData) {
   return new Promise((resolve, reject) => {
     const jobId = nextJobId++;
     stack.push({ jobId, channelData, resolve, reject });
-    emit();
     dispatch();
   });
 }
