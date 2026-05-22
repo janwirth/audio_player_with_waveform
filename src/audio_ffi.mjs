@@ -96,7 +96,9 @@ export function seekPercent(url, pct) {
 
   // Buffering can swallow a seek: assigning currentTime succeeds, but the
   // element snaps back to the last buffered position. Verify ~200 ms after
-  // each attempt and retry up to 5 times.
+  // each attempt and retry up to 5 times. Keep the element paused for the
+  // entire retry sequence so the listener doesn't hear glitchy bursts from
+  // whatever position the audio is stuck at.
   const TOLERANCE_SEC = 1.0;
   const RETRY_MS = 200;
   const MAX_RETRIES = 5;
@@ -104,25 +106,30 @@ export function seekPercent(url, pct) {
   const seek = () => {
     if (!isFinite(audio.duration)) return;
     audio.currentTime = target * audio.duration;
-    audio.play().catch((e) => console.error(e));
   };
 
-  const verify = (attempt) => {
+  const verify = (attempt, onSettled) => {
     setTimeout(() => {
-      if (!isFinite(audio.duration)) return;
-      const diff = Math.abs(audio.currentTime - target * audio.duration);
-      // Playback after a successful seek will have advanced by ~RETRY_MS;
-      // tolerate a generous TOLERANCE_SEC so we don't retry for normal drift.
-      if (diff > TOLERANCE_SEC && attempt < MAX_RETRIES) {
-        seek();
-        verify(attempt + 1);
+      if (!isFinite(audio.duration)) {
+        onSettled();
+        return;
       }
+      const diff = Math.abs(audio.currentTime - target * audio.duration);
+      if (diff <= TOLERANCE_SEC || attempt >= MAX_RETRIES) {
+        onSettled();
+        return;
+      }
+      seek();
+      verify(attempt + 1, onSettled);
     }, RETRY_MS);
   };
 
   const apply = () => {
+    audio.pause();
     seek();
-    verify(0);
+    verify(0, () => {
+      audio.play().catch((e) => console.error(e));
+    });
   };
 
   if (url && url !== currentSrc) {
