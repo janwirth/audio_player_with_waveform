@@ -11,9 +11,9 @@ const DEFAULT_SIZE = 32;
 const BAND_COUNT = 32;
 
 let sharedState = null;
+let initWaiters = [];
 
-function initAudio(audio) {
-  if (sharedState) return sharedState;
+function buildAudioGraph(audio) {
   const ctx = new (window.AudioContext || window.webkitAudioContext)();
   const src = ctx.createMediaElementSource(audio);
   const splitter = ctx.createChannelSplitter(2);
@@ -27,12 +27,35 @@ function initAudio(audio) {
   splitter.connect(leftA, 0);
   splitter.connect(rightA, 1);
   src.connect(ctx.destination);
-  sharedState = { ctx, leftA, rightA };
-  // Some browsers require a user gesture before AudioContext can run.
-  const resume = () => ctx.resume().catch(() => {});
-  window.addEventListener("click", resume, { once: true });
-  window.addEventListener("touchstart", resume, { once: true });
-  return sharedState;
+  return { ctx, leftA, rightA };
+}
+
+// Browsers block AudioContext creation/resumption without a user gesture.
+// Defer the audio graph until the first click/touch on the page.
+function ensureAudio(audio, cb) {
+  if (sharedState) {
+    cb(sharedState);
+    return;
+  }
+  initWaiters.push(cb);
+  if (initWaiters.length > 1) return;
+  const init = () => {
+    document.removeEventListener("click", init, true);
+    document.removeEventListener("touchstart", init, true);
+    document.removeEventListener("keydown", init, true);
+    try {
+      sharedState = buildAudioGraph(audio);
+      sharedState.ctx.resume().catch(() => {});
+      const waiters = initWaiters;
+      initWaiters = [];
+      for (const fn of waiters) fn(sharedState);
+    } catch (e) {
+      console.error("apww stereo init failed", e);
+    }
+  };
+  document.addEventListener("click", init, true);
+  document.addEventListener("touchstart", init, true);
+  document.addEventListener("keydown", init, true);
 }
 
 export function mountStereo(root, innerId) {
@@ -65,16 +88,24 @@ export function mountStereo(root, innerId) {
   ctx2.scale(dpr, dpr);
 
   const audio = getAudio();
-  const state = initAudio(audio);
-  if (!state) return;
-
-  const leftData = new Uint8Array(state.leftA.frequencyBinCount);
-  const rightData = new Uint8Array(state.rightA.frequencyBinCount);
-
+  let state = null;
+  let leftData = null;
+  let rightData = null;
   let raf = 0;
   let rendering = true;
+
+  ensureAudio(audio, (s) => {
+    state = s;
+    leftData = new Uint8Array(state.leftA.frequencyBinCount);
+    rightData = new Uint8Array(state.rightA.frequencyBinCount);
+  });
+
   const render = () => {
     if (!rendering) return;
+    if (!state) {
+      raf = requestAnimationFrame(render);
+      return;
+    }
     if (state.ctx.state === "suspended") state.ctx.resume().catch(() => {});
 
     state.leftA.getByteFrequencyData(leftData);

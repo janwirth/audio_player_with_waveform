@@ -1,5 +1,19 @@
 // Decode audio buffer -> waveform + spectral data and render to canvas.
 // Port of janwirth/react-web-audio-platform waveform pipeline.
+//
+// Pipeline:
+//   1. IndexedDB cache lookup (persistent).
+//   2. fetch URL + decodeAudioData on main thread (transcode via ffmpeg
+//      first if the browser can't decode this format).
+//   3. Hand the PCM Float32Array to the worker pool (LIFO, max 3 in flight)
+//      for waveform + spectral analysis.
+//   4. Persist result back to IndexedDB.
+
+import {
+  schedule as scheduleAnalysis,
+  cacheGet,
+  cachePut,
+} from "./waveform_pool_ffi.mjs";
 
 let audioCtx = null;
 const renderCache = new Map(); // url -> { waveformData, spectralData }
@@ -18,20 +32,40 @@ export async function loadRenderData(url) {
   if (inflight.has(url)) return inflight.get(url);
 
   const p = (async () => {
+    // 1. IDB cache hit?
+    const cached = await cacheGet(url);
+    if (cached && cached.waveformData && cached.spectralData) {
+      renderCache.set(url, cached);
+      inflight.delete(url);
+      return cached;
+    }
+
+    // 2. Decode (main thread; browser uses a separate native thread anyway).
     const buf = await fetch(url).then((r) => r.arrayBuffer());
     const audioBuffer = await ctx().decodeAudioData(buf.slice(0));
-    const waveformData = getWaveformData(audioBuffer, 600);
-    const spectralData = getSpectralData(audioBuffer, waveformData);
-    const data = { waveformData, spectralData };
+
+    // 3. Schedule analysis on a worker. Copy the channel data since the
+    // transfer detaches the buffer (AudioBuffer keeps its own copy).
+    const ch = audioBuffer.getChannelData(0);
+    const pcm = new Float32Array(ch);
+    const data = await scheduleAnalysis(pcm);
+
+    // 4. Persist for next session.
+    cachePut(url, data);
     renderCache.set(url, data);
     inflight.delete(url);
     return data;
-  })();
+  })().catch((err) => {
+    inflight.delete(url);
+    throw err;
+  });
   inflight.set(url, p);
   return p;
 }
 
-function getWaveformData(audioBuffer, samples = 600) {
+// (kept for reference; analysis now lives in waveform_worker.mjs)
+// eslint-disable-next-line no-unused-vars
+function _legacyGetWaveformData(audioBuffer, samples = 600) {
   const raw = audioBuffer.getChannelData(0);
   const len = raw.length;
   const MAX = 100000;
@@ -58,7 +92,8 @@ function getWaveformData(audioBuffer, samples = 600) {
   return waveform;
 }
 
-function getSpectralData(audioBuffer, waveformData) {
+// eslint-disable-next-line no-unused-vars
+function _legacyGetSpectralData(audioBuffer, waveformData) {
   const raw = audioBuffer.getChannelData(0);
   const len = raw.length;
   const wl = waveformData.length;

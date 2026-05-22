@@ -1,8 +1,10 @@
 // Sliders + selects + checkboxes driving the OKLCH palette and the three
-// playhead strips. All inputs push into the live pub/sub channels.
+// playhead strips. Plain monospace, b&w. Groups laid out in separate rows.
 
 import { oklchPalette, setLivePalette, setLivePlayhead } from "./waveform_ffi.mjs";
 import { setKeyboardEnabled } from "./audio_ffi.mjs";
+
+const MONO = "ui-monospace, 'SF Mono', Menlo, Consolas, monospace";
 
 const COLOR_DEFAULTS = {
   hue: 212,
@@ -26,11 +28,11 @@ const PLAYHEAD_DEFAULTS = {
 };
 
 const COLOR_SLIDERS = [
-  { key: "contrast", label: "CTR", min: -1, max: 1, step: 0.01 },
-  { key: "lightness", label: "LGT", min: 0.1, max: 0.9, step: 0.01 },
-  { key: "saturation", label: "SAT", min: 0, max: 0.4, step: 0.01 },
-  { key: "hue", label: "HUE", min: 0, max: 360, step: 1 },
-  { key: "hueSpread", label: "SPR", min: 0, max: 180, step: 1 },
+  { key: "contrast", label: "ctr", min: -1, max: 1, step: 0.01 },
+  { key: "lightness", label: "lgt", min: 0.1, max: 0.9, step: 0.01 },
+  { key: "saturation", label: "sat", min: 0, max: 0.4, step: 0.01 },
+  { key: "hue", label: "hue", min: 0, max: 360, step: 1 },
+  { key: "hueSpread", label: "spr", min: 0, max: 180, step: 1 },
 ];
 
 const PLAYHEAD_SLIDERS = [
@@ -59,17 +61,17 @@ const BLEND_MODES = [
 ];
 
 const MODE_SELECTS = [
-  { key: "leftMode", label: "L MIX" },
-  { key: "centerMode", label: "C MIX" },
-  { key: "rightMode", label: "R MIX" },
+  { key: "leftMode", label: "L mix" },
+  { key: "centerMode", label: "C mix" },
+  { key: "rightMode", label: "R mix" },
 ];
 
 const COLOR_OPTIONS = ["black", "white", "invert", "triad1", "triad2"];
 
 const COLOR_MULTI = [
-  { key: "leftColors", label: "L COL" },
-  { key: "centerColors", label: "C COL" },
-  { key: "rightColors", label: "R COL" },
+  { key: "leftColors", label: "L col" },
+  { key: "centerColors", label: "C col" },
+  { key: "rightColors", label: "R col" },
 ];
 
 export function mountColorControls(root, innerId) {
@@ -91,36 +93,25 @@ export function mountColorControls(root, innerId) {
   Object.assign(container.style, {
     display: "flex",
     flexDirection: "column",
-    gap: "12px",
-    fontFamily: "sans-serif",
+    gap: "14px",
+    fontFamily: MONO,
     fontSize: "11px",
+    color: "#000",
     userSelect: "none",
   });
   if (root.host) root.host.style.display = "block";
 
-  const row = document.createElement("div");
-  Object.assign(row.style, {
-    display: "flex",
-    flexDirection: "row",
-    flexWrap: "wrap",
-    gap: "12px",
-    alignItems: "flex-end",
-  });
-  container.appendChild(row);
-
   const readout = document.createElement("pre");
   Object.assign(readout.style, {
     margin: "0",
-    padding: "8px 10px",
-    background: "#f4f4f4",
-    border: "1px solid #ddd",
-    borderRadius: "4px",
-    fontSize: "10px",
-    fontFamily: "ui-monospace, monospace",
+    padding: "10px 12px",
+    background: "#fff",
+    border: "1px solid #000",
+    fontSize: "11px",
+    fontFamily: MONO,
     whiteSpace: "pre-wrap",
-    color: "#333",
+    color: "#000",
   });
-  container.appendChild(readout);
 
   wrap.appendChild(container);
 
@@ -140,15 +131,28 @@ export function mountColorControls(root, innerId) {
     refreshReadout();
   };
 
-  const sep = () => {
-    const s = document.createElement("div");
-    Object.assign(s.style, {
-      width: "1px",
-      height: "120px",
-      background: "#ddd",
-      alignSelf: "flex-end",
+  const group = (label, children) => {
+    const wrap = document.createElement("section");
+    Object.assign(wrap.style, {
+      display: "flex",
+      flexDirection: "row",
+      flexWrap: "wrap",
+      gap: "14px",
+      alignItems: "flex-end",
+      borderTop: "1px dashed #000",
+      paddingTop: "10px",
     });
-    return s;
+    const lbl = document.createElement("div");
+    Object.assign(lbl.style, {
+      width: "70px",
+      alignSelf: "center",
+      fontFamily: MONO,
+      color: "#000",
+    });
+    lbl.textContent = label;
+    wrap.appendChild(lbl);
+    for (const c of children) wrap.appendChild(c);
+    return wrap;
   };
 
   const buildSlider = (s, state, push) => {
@@ -158,7 +162,7 @@ export function mountColorControls(root, innerId) {
       flexDirection: "column",
       alignItems: "center",
       gap: "4px",
-      width: "32px",
+      width: "36px",
     });
     const input = document.createElement("input");
     input.type = "range";
@@ -170,8 +174,9 @@ export function mountColorControls(root, innerId) {
       writingMode: "vertical-lr",
       direction: "rtl",
       width: "20px",
-      height: "120px",
+      height: "110px",
       padding: "0",
+      accentColor: "#000",
     });
     input.addEventListener("input", () => {
       state[s.key] = parseFloat(input.value);
@@ -179,7 +184,7 @@ export function mountColorControls(root, innerId) {
     });
     const lbl = document.createElement("span");
     lbl.textContent = s.label;
-    lbl.style.color = "#555";
+    lbl.style.color = "#000";
     col.appendChild(input);
     col.appendChild(lbl);
     return col;
@@ -190,8 +195,9 @@ export function mountColorControls(root, innerId) {
     Object.assign(col.style, {
       display: "flex",
       flexDirection: "column",
-      alignItems: "center",
+      alignItems: "flex-start",
       gap: "4px",
+      minWidth: "120px",
     });
     const select = document.createElement("select");
     for (const m of BLEND_MODES) {
@@ -201,16 +207,23 @@ export function mountColorControls(root, innerId) {
       if (m === state[def.key]) opt.selected = true;
       select.appendChild(opt);
     }
-    Object.assign(select.style, { height: "24px", fontSize: "11px" });
+    Object.assign(select.style, {
+      height: "24px",
+      fontSize: "11px",
+      fontFamily: MONO,
+      border: "1px solid #000",
+      background: "#fff",
+      color: "#000",
+    });
     select.addEventListener("change", () => {
       state[def.key] = select.value;
       push();
     });
     const lbl = document.createElement("span");
     lbl.textContent = def.label;
-    lbl.style.color = "#555";
-    col.appendChild(select);
+    lbl.style.color = "#000";
     col.appendChild(lbl);
+    col.appendChild(select);
     return col;
   };
 
@@ -221,17 +234,24 @@ export function mountColorControls(root, innerId) {
       flexDirection: "column",
       alignItems: "flex-start",
       gap: "2px",
+      minWidth: "110px",
     });
+    const lbl = document.createElement("span");
+    lbl.textContent = def.label;
+    Object.assign(lbl.style, { color: "#000", marginBottom: "2px" });
+    col.appendChild(lbl);
     for (const name of COLOR_OPTIONS) {
       const r = document.createElement("label");
       Object.assign(r.style, {
         display: "flex",
         gap: "4px",
         alignItems: "center",
+        color: "#000",
       });
       const cb = document.createElement("input");
       cb.type = "checkbox";
       cb.checked = state[def.key].includes(name);
+      cb.style.accentColor = "#000";
       cb.addEventListener("change", () => {
         const cur = new Set(state[def.key]);
         if (cb.checked) cur.add(name);
@@ -241,15 +261,10 @@ export function mountColorControls(root, innerId) {
       });
       const txt = document.createElement("span");
       txt.textContent = name;
-      txt.style.color = "#555";
       r.appendChild(cb);
       r.appendChild(txt);
       col.appendChild(r);
     }
-    const lbl = document.createElement("span");
-    lbl.textContent = def.label;
-    Object.assign(lbl.style, { color: "#555", marginTop: "4px" });
-    col.appendChild(lbl);
     return col;
   };
 
@@ -257,36 +272,62 @@ export function mountColorControls(root, innerId) {
     const col = document.createElement("label");
     Object.assign(col.style, {
       display: "flex",
-      flexDirection: "column",
       alignItems: "center",
-      gap: "4px",
+      gap: "6px",
+      color: "#000",
     });
     const cb = document.createElement("input");
     cb.type = "checkbox";
     cb.checked = initial;
+    cb.style.accentColor = "#000";
     cb.addEventListener("change", () => onChange(cb.checked));
     const lbl = document.createElement("span");
     lbl.textContent = label;
-    lbl.style.color = "#555";
     col.appendChild(cb);
     col.appendChild(lbl);
     return col;
   };
 
-  for (const s of COLOR_SLIDERS) row.appendChild(buildSlider(s, colorState, pushColor));
-  row.appendChild(sep());
-  for (const s of PLAYHEAD_SLIDERS) row.appendChild(buildSlider(s, phState, pushPlayhead));
-  row.appendChild(
-    buildBoolToggle("L FILL", phState.leftFill, (v) => {
-      phState.leftFill = v;
-      pushPlayhead();
-    }),
+  // Row 1: palette sliders
+  container.appendChild(
+    group(
+      "palette",
+      COLOR_SLIDERS.map((s) => buildSlider(s, colorState, pushColor)),
+    ),
   );
-  row.appendChild(
-    buildBoolToggle("Pause with space", true, (v) => setKeyboardEnabled(v)),
+  // Row 2: playhead width sliders + fill toggle
+  container.appendChild(
+    group("playhead", [
+      ...PLAYHEAD_SLIDERS.map((s) => buildSlider(s, phState, pushPlayhead)),
+      buildBoolToggle("L fill", phState.leftFill, (v) => {
+        phState.leftFill = v;
+        pushPlayhead();
+      }),
+    ]),
   );
-  for (const s of MODE_SELECTS) row.appendChild(buildSelect(s, phState, pushPlayhead));
-  for (const s of COLOR_MULTI) row.appendChild(buildMulti(s, phState, pushPlayhead));
+  // Row 3: blend modes
+  container.appendChild(
+    group(
+      "blend",
+      MODE_SELECTS.map((s) => buildSelect(s, phState, pushPlayhead)),
+    ),
+  );
+  // Row 4: stripe colors
+  container.appendChild(
+    group(
+      "colors",
+      COLOR_MULTI.map((s) => buildMulti(s, phState, pushPlayhead)),
+    ),
+  );
+  // Row 5: input + readout
+  container.appendChild(
+    group("input", [
+      buildBoolToggle("pause with space", true, (v) =>
+        setKeyboardEnabled(v),
+      ),
+    ]),
+  );
+  container.appendChild(readout);
 
   pushColor();
   pushPlayhead();

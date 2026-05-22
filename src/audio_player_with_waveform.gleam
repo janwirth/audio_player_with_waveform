@@ -7,7 +7,7 @@
 
 import gleam/result
 import lustre
-import lustre/attribute.{type Attribute, attribute, class}
+import lustre/attribute.{type Attribute, attribute}
 import lustre/effect.{type Effect}
 import lustre/element.{type Element, element}
 import lustre/element/html
@@ -16,6 +16,7 @@ import lustre/event
 import internal/color_controls
 import internal/host
 import internal/now_playing
+import internal/queue_status
 import internal/stereo
 import internal/waveform
 
@@ -30,6 +31,7 @@ pub fn register() -> Result(Nil, lustre.Error) {
   use _ <- result.try(waveform.register())
   use _ <- result.try(now_playing.register())
   use _ <- result.try(stereo.register())
+  use _ <- result.try(queue_status.register())
   color_controls.register()
 }
 
@@ -74,6 +76,13 @@ pub fn stereo() -> Element(msg) {
 /// Square px for the stereo visualiser.
 pub fn size(px: Int) -> Attribute(msg) {
   attribute("size", int_to_string(px))
+}
+
+/// Self-updating waveform queue badge: shows worker-pool active + pending
+/// counts plus persistent IndexedDB cache size. Max 3 workers, newest job
+/// runs first (LIFO).
+pub fn queue_status() -> Element(msg) {
+  element(queue_status.element_name, [], [])
 }
 
 // ---------------------------------------------------------------------------
@@ -150,8 +159,7 @@ fn int_to_string(n: Int) -> String
 // importing this module never call `main` so this code is inert for them.
 // ---------------------------------------------------------------------------
 
-// const demo_url: String = "https://samplelib.com/mp3/sample-40s.mp3"
-const demo_url: String = "https://t4.bcbits.com/stream/0efb94413b51f1ae432714544853de07/mp3-128/446649198?p=0&ts=1779449905&t=b72a4ddf44ad5d447f4d3a6ce903fcb07a2f5a47&token=1779449905_1a98492471d533a9fc2093d447fd40afb03bbb5f"
+const demo_url: String = "https://samplelib.com/mp3/sample-40s.mp3"
 
 type DemoMsg {
   TogglePlay(String)
@@ -177,16 +185,58 @@ fn demo_update(_model: Nil, msg: DemoMsg) -> #(Nil, Effect(DemoMsg)) {
 }
 
 fn demo_view(_model: Nil) -> Element(DemoMsg) {
-  html.div([class("demo"), attribute("style", "padding: 24px; font-family: sans-serif; max-width: 720px;")], [
+  let mono = "ui-monospace, 'SF Mono', Menlo, Consolas, monospace"
+  let page =
+    "padding: 24px clamp(16px, 4vw, 56px);"
+    <> "width: 100%; box-sizing: border-box;"
+    <> "font-family: "
+    <> mono
+    <> "; color: #000; background: #fff; min-height: 100vh;"
+  let title = "font-size: 18px; margin: 0; font-weight: 700;"
+  let sub = "font-size: 12px; margin: 4px 0 18px 0; color: #000;"
+  let card = "border: 1px solid #000; padding: 14px; background: #fff;"
+  let row =
+    "display:flex; gap:8px; align-items:center; margin-top:12px; flex-wrap:wrap;"
+  let btn =
+    "background:#fff; color:#000; border:1px solid #000; padding:4px 10px;"
+    <> "font-family: inherit; font-size: 12px; cursor: pointer;"
+  let now_box = "border: 1px solid #000; padding: 4px 8px; font-size: 12px;"
+  let controls_card =
+    "border: 1px solid #000; padding: 14px; margin-top: 16px; background: #fff;"
+
+  let track = fn(label: String, url: String) {
+    html.div([attribute("style", card <> "margin-top:12px;")], [
+      html.div([attribute("style", "font-size:11px;margin-bottom:8px;opacity:.7;")], [
+        html.text(label),
+      ]),
+      waveform(url: url, opts: [height(96)]),
+      html.div([attribute("style", row)], [
+        html.button(
+          [event.on_click(TogglePlay(url)), attribute("style", btn)],
+          [html.text("play / pause")],
+        ),
+        html.button(
+          [event.on_click(SeekHalf(url)), attribute("style", btn)],
+          [html.text("seek 50%")],
+        ),
+      ]),
+    ])
+  }
+
+  html.div([attribute("style", page)], [
     host(),
-    html.h1([], [html.text("audio_player_with_waveform — demo")]),
-    waveform(url: demo_url, opts: [height(72)]),
-    html.div([attribute("style", "display: flex; gap: 8px; align-items: center; margin-top: 12px;")], [
-      html.button([event.on_click(TogglePlay(demo_url))], [html.text("⏯  Toggle")]),
-      stereo(),
-      html.button([event.on_click(SeekHalf(demo_url))], [html.text("⤳ Seek 50%")]),
-      now_playing(),
+    html.h1([attribute("style", title)], [html.text("audio_player_with_waveform")]),
+    html.p([attribute("style", sub)], [
+      html.text(
+        "click the wave to seek · space toggles play · playing one swaps the active track",
+      ),
     ]),
-    html.div([attribute("style", "margin-top: 24px;")], [color_controls()]),
+    html.div([attribute("style", row)], [
+      stereo(),
+      html.div([attribute("style", now_box)], [now_playing()]),
+      html.div([attribute("style", now_box)], [queue_status()]),
+    ]),
+    track("track 1", demo_url),
+    html.div([attribute("style", controls_card)], [color_controls()]),
   ])
 }

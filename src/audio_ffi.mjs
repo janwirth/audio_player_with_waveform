@@ -62,26 +62,11 @@ function bindStatusEvents(audio) {
   audio.addEventListener("seeked", emit);
 }
 
-async function maybeTranscode(url) {
-  try {
-    const r = await fetch(url, { method: "HEAD" });
-    const ct = r.headers.get("Content-Type") || "";
-    const canPlay = getAudio().canPlayType(ct);
-    if (!ct || canPlay !== "") return url;
-    const { transcodeToMp3 } = await import("./ffmpeg_ffi.mjs");
-    return await transcodeToMp3(url);
-  } catch (_) {
-    return url;
-  }
-}
-
 export async function setSrc(url) {
-  if (!url) return;
+  if (!url || currentSrc === url) return;
   const audio = getAudio();
-  const resolvedUrl = await maybeTranscode(url);
-  if (currentSrc === resolvedUrl) return;
-  currentSrc = resolvedUrl;
-  audio.src = resolvedUrl;
+  currentSrc = url;
+  audio.src = url;
   audio.load();
 }
 
