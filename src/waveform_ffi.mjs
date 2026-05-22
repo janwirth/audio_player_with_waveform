@@ -65,7 +65,7 @@ export async function loadRenderData(url) {
 
     // Not cached: gate the heavy pipeline (fetch + decode + analyse) behind
     // the global concurrency scheduler. Newest mounted waveforms run first.
-    return scheduleJob(async () => {
+    return scheduleJob(url, async () => {
       const buf = await fetch(url).then((r) => r.arrayBuffer());
       const audioBuffer = await ctx().decodeAudioData(buf.slice(0));
       const pcm = downsampleForAnalysis(audioBuffer);

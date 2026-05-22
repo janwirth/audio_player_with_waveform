@@ -8,10 +8,12 @@
 
 const MAX_CONCURRENT = 3;
 const MAX_WORKERS = 3;
+const MAX_QUEUE = 100;
 
 // ---- outer pipeline scheduler ------------------------------------------
 
-const jobStack = []; // pending {fn, resolve, reject}
+const jobStack = []; // pending {key, fn, resolve, reject}
+const jobPromises = new Map(); // key -> Promise (pending or active; deduped)
 let jobActive = 0;
 const subs = new Set();
 
@@ -54,12 +56,30 @@ function pumpJobs() {
   }
 }
 
-export function scheduleJob(fn) {
-  return new Promise((resolve, reject) => {
-    jobStack.push({ fn, resolve, reject });
+// Schedule a pipeline job keyed by `key` (e.g. URL).
+// - Same key already pending or active → return the existing promise (dedup).
+// - Stack capped at MAX_QUEUE; oldest entries (bottom of the stack) are
+//   dropped when the cap is exceeded.
+export function scheduleJob(key, fn) {
+  const existing = jobPromises.get(key);
+  if (existing) return existing;
+  const promise = new Promise((resolve, reject) => {
+    jobStack.push({ key, fn, resolve, reject });
+    while (jobStack.length > MAX_QUEUE) {
+      const dropped = jobStack.shift();
+      jobPromises.delete(dropped.key);
+      dropped.reject(new Error("queue overflow"));
+    }
     emit();
     pumpJobs();
   });
+  jobPromises.set(key, promise);
+  // Always clear the map entry once the job settles, even on rejection.
+  promise.then(
+    () => jobPromises.delete(key),
+    () => jobPromises.delete(key),
+  );
+  return promise;
 }
 
 // ---- analysis worker pool (internal; used inside scheduleJob bodies) ----
