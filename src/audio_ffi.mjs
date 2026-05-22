@@ -100,7 +100,7 @@ export function seekPercent(url, pct) {
   // entire retry sequence so the listener doesn't hear glitchy bursts from
   // whatever position the audio is stuck at.
   const TOLERANCE_SEC = 1.0;
-  const RETRY_MS = 200;
+  const RETRY_MS = 300;
   const MAX_RETRIES = 5;
 
   const seek = () => {
