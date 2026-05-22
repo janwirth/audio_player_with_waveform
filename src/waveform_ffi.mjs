@@ -298,6 +298,9 @@ export function renderWaveform(canvas, data, palette) {
   const maxW = Math.max(...waveformData);
   if (maxW <= 0) return;
 
+  const QL = 8;
+  const FQL = 16;
+
   // Normalize with two minimum-threshold constraints (smallest effectiveMax
   // wins — that's the most aggressive amplification that still satisfies
   // both):
@@ -312,8 +315,6 @@ export function renderWaveform(canvas, data, palette) {
   if (p50 > 0) effectiveMax = Math.min(effectiveMax, p50 / 1.0);
   if (p10 > 0) effectiveMax = Math.min(effectiveMax, p10 / (1 / QL));
   if (effectiveMax <= 0) effectiveMax = maxW;
-  const QL = 8;
-  const FQL = 16;
   const maxAmp = h - 1;
   const normWave = waveformData.map((v) => {
     const n = Math.min(1, v / effectiveMax);
