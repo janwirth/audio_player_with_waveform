@@ -298,10 +298,20 @@ export function renderWaveform(canvas, data, palette) {
   const maxW = Math.max(...waveformData);
   if (maxW <= 0) return;
 
-  // Normalize: ensure median sample reaches full height (constraints [0.5, 1.0])
+  // Normalize with two minimum-threshold constraints (smallest effectiveMax
+  // wins — that's the most aggressive amplification that still satisfies
+  // both):
+  //   - median sample must reach full height
+  //   - the 10th-percentile sample must reach at least the first
+  //     quantization band (1/QL of full), so at most ~10% of samples
+  //     quantize down to zero height and look visually silent.
   const sorted = [...waveformData].sort((a, b) => a - b);
-  const median = sorted[Math.floor(sorted.length * 0.5)] || maxW;
-  const effectiveMax = median > 0 ? median : maxW;
+  const p10 = sorted[Math.floor(sorted.length * 0.1)] || 0;
+  const p50 = sorted[Math.floor(sorted.length * 0.5)] || 0;
+  let effectiveMax = maxW;
+  if (p50 > 0) effectiveMax = Math.min(effectiveMax, p50 / 1.0);
+  if (p10 > 0) effectiveMax = Math.min(effectiveMax, p10 / (1 / QL));
+  if (effectiveMax <= 0) effectiveMax = maxW;
   const QL = 8;
   const FQL = 16;
   const maxAmp = h - 1;
