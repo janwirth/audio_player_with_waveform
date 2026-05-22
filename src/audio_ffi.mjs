@@ -92,12 +92,39 @@ export function toggle(url) {
 
 export function seekPercent(url, pct) {
   const audio = getAudio();
-  const apply = () => {
-    if (isFinite(audio.duration)) {
-      audio.currentTime = Math.max(0, Math.min(1, pct)) * audio.duration;
-      audio.play().catch((e) => console.error(e));
-    }
+  const target = Math.max(0, Math.min(1, pct));
+
+  // Buffering can swallow a seek: assigning currentTime succeeds, but the
+  // element snaps back to the last buffered position. Verify ~200 ms after
+  // each attempt and retry up to 5 times.
+  const TOLERANCE_SEC = 1.0;
+  const RETRY_MS = 200;
+  const MAX_RETRIES = 5;
+
+  const seek = () => {
+    if (!isFinite(audio.duration)) return;
+    audio.currentTime = target * audio.duration;
+    audio.play().catch((e) => console.error(e));
   };
+
+  const verify = (attempt) => {
+    setTimeout(() => {
+      if (!isFinite(audio.duration)) return;
+      const diff = Math.abs(audio.currentTime - target * audio.duration);
+      // Playback after a successful seek will have advanced by ~RETRY_MS;
+      // tolerate a generous TOLERANCE_SEC so we don't retry for normal drift.
+      if (diff > TOLERANCE_SEC && attempt < MAX_RETRIES) {
+        seek();
+        verify(attempt + 1);
+      }
+    }, RETRY_MS);
+  };
+
+  const apply = () => {
+    seek();
+    verify(0);
+  };
+
   if (url && url !== currentSrc) {
     setSrc(url).then(() => waitReady(audio, apply));
   } else {
