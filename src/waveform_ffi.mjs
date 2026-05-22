@@ -28,6 +28,29 @@ function ctx() {
   return audioCtx;
 }
 
+// Long tracks blow up the spectral pass (which walks every PCM sample).
+// Cap the worker input at ~10 minutes of audio by averaging adjacent samples
+// (boxcar low-pass) — analysis cost stays bounded regardless of track length.
+const ANALYSIS_TARGET_SEC = 600;
+
+function downsampleForAnalysis(audioBuffer) {
+  const src = audioBuffer.getChannelData(0);
+  const ratio = Math.max(
+    1,
+    Math.ceil(audioBuffer.duration / ANALYSIS_TARGET_SEC),
+  );
+  if (ratio === 1) return new Float32Array(src);
+  const outLen = Math.floor(src.length / ratio);
+  const out = new Float32Array(outLen);
+  for (let i = 0; i < outLen; i++) {
+    let sum = 0;
+    const start = i * ratio;
+    for (let j = 0; j < ratio; j++) sum += src[start + j];
+    out[i] = sum / ratio;
+  }
+  return out;
+}
+
 export async function loadRenderData(url) {
   if (renderCache.has(url)) return renderCache.get(url);
   if (inflight.has(url)) return inflight.get(url);
@@ -45,8 +68,7 @@ export async function loadRenderData(url) {
     return scheduleJob(async () => {
       const buf = await fetch(url).then((r) => r.arrayBuffer());
       const audioBuffer = await ctx().decodeAudioData(buf.slice(0));
-      const ch = audioBuffer.getChannelData(0);
-      const pcm = new Float32Array(ch);
+      const pcm = downsampleForAnalysis(audioBuffer);
       const data = await scheduleAnalysis(pcm);
       cachePut(url, data);
       renderCache.set(url, data);
